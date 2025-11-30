@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { TarotCardData, DeckSection, DeckTheme } from '../types';
 import { generateDeckSectionMetadata, generateCardImage } from '../services/geminiService';
 import TarotCard from './TarotCard';
-import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, Image as ImageIcon, X } from 'lucide-react';
+import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, Image as ImageIcon, X, Key } from 'lucide-react';
 import JSZip from 'jszip';
 
 const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'];
@@ -64,8 +64,9 @@ const DeckGenerator: React.FC = () => {
         [section]: initialCards
       }));
 
-      // 2. Generate Images sequentially (max 2 concurrent to be safe with limits)
-      const CONCURRENCY = 2;
+      // 2. Generate Images sequentially
+      // Reduced concurrency to 1 and added delay to respect rate limits (approx 15 RPM for free tier)
+      const CONCURRENCY = 1;
       const cardsToProcess = [...initialCards];
       const results: TarotCardData[] = [...initialCards];
 
@@ -95,6 +96,12 @@ const DeckGenerator: React.FC = () => {
           [section]: [...results]
         }));
         setProgress(prev => prev ? { ...prev, current: Math.min(prev.total, i + CONCURRENCY) } : null);
+
+        // Add a delay between batches to respect API rate limits
+        // 2000ms delay helps keep us within typical free tier limits (approx 15 requests per minute)
+        if (i + CONCURRENCY < cardsToProcess.length) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
 
     } catch (e: any) {
@@ -373,9 +380,29 @@ const DeckGenerator: React.FC = () => {
         </div>
         
         {error && (
-            <div className="mt-4 p-3 bg-red-950/40 border border-red-900/50 rounded-lg text-red-200 text-sm flex items-center">
-              <AlertCircle className="w-4 h-4 mr-2" />
-              {error}
+            <div className="mt-4 p-4 bg-red-950/40 border border-red-900/50 rounded-lg text-red-200 text-sm">
+              <div className="flex items-center font-bold mb-2">
+                 <AlertCircle className="w-4 h-4 mr-2" />
+                 <span>{error}</span>
+              </div>
+              
+              {/* Specialized Help for API Key issues */}
+              {error.includes("API Key") && (
+                 <div className="ml-6 text-xs text-red-300/80 space-y-2 mt-2 border-t border-red-900/30 pt-2">
+                    <p className="font-semibold text-white">How to fix this:</p>
+                    <ol className="list-decimal pl-4 space-y-1">
+                       <li>Do not paste the key directly into the code files.</li>
+                       <li>Look for a <strong>"Secrets"</strong>, <strong>"Environment Variables"</strong>, or <strong>".env"</strong> section in your editor.</li>
+                       <li>Create a new variable named <code className="bg-black/30 px-1 rounded text-red-100">API_KEY</code>.</li>
+                       <li>Paste your Google Gemini key string as the value.</li>
+                       <li>Restart the development server if running locally.</li>
+                    </ol>
+                    <div className="flex items-center text-indigo-300 mt-2">
+                      <Key className="w-3 h-3 mr-1" />
+                      <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" className="underline hover:text-white">Get a free key from Google AI Studio</a>
+                    </div>
+                 </div>
+              )}
             </div>
         )}
 

@@ -3,9 +3,6 @@ import { TarotCardData, DeckSection } from '../types';
 
 // Ensure API key is available
 const apiKey = process.env.API_KEY;
-if (!apiKey) {
-  console.error("API_KEY is missing from environment variables.");
-}
 
 const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
 
@@ -17,6 +14,11 @@ export const generateDeckSectionMetadata = async (
   theme: string,
   artStyle: string
 ): Promise<TarotCardData[]> => {
+  // Explicit check to give user feedback if they forgot to set the env var
+  if (!apiKey || apiKey === 'dummy-key') {
+    throw new Error("API Key is missing. Please set the API_KEY environment variable in your project settings.");
+  }
+
   try {
     let promptContext = "";
     let expectedNamesList = "";
@@ -92,6 +94,10 @@ export const generateDeckSectionMetadata = async (
  * Generates an image for a specific tarot card using its visual prompt and optional reference style.
  */
 export const generateCardImage = async (visualPrompt: string, referenceImageBase64?: string): Promise<string> => {
+  if (!apiKey || apiKey === 'dummy-key') {
+    throw new Error("API Key is missing. Please set the API_KEY environment variable in your project settings.");
+  }
+
   try {
     const parts: any[] = [];
 
