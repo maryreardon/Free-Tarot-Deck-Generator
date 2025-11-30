@@ -2,23 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { TarotCardData, DeckSection, DeckTheme } from '../types';
 import { generateDeckSectionMetadata, generateCardImage, hasApiKey, validateApiKey } from '../services/geminiService';
 import TarotCard from './TarotCard';
-import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, Image as ImageIcon, X, Key, Wifi, WifiOff, AlertTriangle, Dice5 } from 'lucide-react';
+import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, Image as ImageIcon, X, Key, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import JSZip from 'jszip';
 
 const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'];
-
-const RANDOM_THEMES = [
-  "Cyberpunk Neon City",
-  "Art Nouveau Nature",
-  "Dark Fantasy Souls",
-  "80s Synthwave Retro",
-  "Victorian Gothic Horror",
-  "Space Opera Sci-Fi",
-  "Steampunk Insects",
-  "Watercolor Dreamscape",
-  "Pixel Art RPG",
-  "Ancient Egyptian Gold"
-];
 
 type ConnectionStatus = 'checking' | 'connected' | 'invalid' | 'missing';
 
@@ -58,11 +45,6 @@ const DeckGenerator: React.FC = () => {
     setConnectionStatus('checking');
     const isValid = await validateApiKey();
     setConnectionStatus(isValid ? 'connected' : 'invalid');
-  };
-
-  const handleRandomTheme = () => {
-    const random = RANDOM_THEMES[Math.floor(Math.random() * RANDOM_THEMES.length)];
-    setThemeInput(random);
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -340,16 +322,9 @@ const DeckGenerator: React.FC = () => {
                     value={themeInput}
                     onChange={(e) => setThemeInput(e.target.value)}
                     placeholder="e.g. Gnome World"
-                    className="w-full bg-black/40 border border-indigo-900/50 rounded-lg pl-10 pr-12 py-2 text-indigo-100 focus:border-indigo-500 outline-none"
+                    className="w-full bg-black/40 border border-indigo-900/50 rounded-lg pl-10 pr-4 py-2 text-indigo-100 focus:border-indigo-500 outline-none"
                   />
                   <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-500" />
-                  <button 
-                    onClick={handleRandomTheme}
-                    className="absolute right-2 top-1.5 p-1.5 rounded-md hover:bg-indigo-500/30 text-indigo-400 transition-colors"
-                    title="Surprise Me (Random Theme)"
-                  >
-                    <Dice5 className="w-4 h-4" />
-                  </button>
                 </div>
                 <p className="text-[10px] text-gray-500">e.g. "Gnome World", "Space Marines", "Cat Empire"</p>
              </div>
