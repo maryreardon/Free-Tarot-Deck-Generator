@@ -1,11 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { TarotCardData, DeckSection, DeckTheme } from '../types';
-import { generateDeckSectionMetadata, generateCardImage } from '../services/geminiService';
+import { generateDeckSectionMetadata, generateCardImage, hasApiKey, validateApiKey } from '../services/geminiService';
 import TarotCard from './TarotCard';
-import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, Image as ImageIcon, X, Key } from 'lucide-react';
+import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, Image as ImageIcon, X, Key, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import JSZip from 'jszip';
 
 const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'];
+
+type ConnectionStatus = 'checking' | 'connected' | 'invalid' | 'missing';
 
 const DeckGenerator: React.FC = () => {
   // Default to the requested "Gnome Deck" settings
@@ -26,8 +28,24 @@ const DeckGenerator: React.FC = () => {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isZipping, setIsZipping] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('checking');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    checkConnection();
+  }, []);
+
+  const checkConnection = async () => {
+    if (!hasApiKey()) {
+      setConnectionStatus('missing');
+      return;
+    }
+
+    setConnectionStatus('checking');
+    const isValid = await validateApiKey();
+    setConnectionStatus(isValid ? 'connected' : 'invalid');
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -211,6 +229,46 @@ const DeckGenerator: React.FC = () => {
   const totalCardsGenerated = allCards.filter(c => !c.isLoadingImage && c.imageUrl).length;
   const activeCards = deck[activeSection];
 
+  const getConnectionStatusUI = () => {
+    switch(connectionStatus) {
+      case 'checking':
+        return {
+           color: 'text-amber-400',
+           bg: 'bg-amber-950/50',
+           border: 'border-amber-500/30',
+           text: 'Verifying Key...',
+           icon: <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+        };
+      case 'connected':
+        return {
+           color: 'text-emerald-400',
+           bg: 'bg-emerald-950/50',
+           border: 'border-emerald-500/30',
+           text: 'AI System Online',
+           icon: <Wifi className="w-3 h-3 mr-2" />
+        };
+      case 'invalid':
+        return {
+           color: 'text-red-400',
+           bg: 'bg-red-950/50',
+           border: 'border-red-500/30',
+           text: 'Invalid API Key',
+           icon: <AlertTriangle className="w-3 h-3 mr-2" />
+        };
+      case 'missing':
+      default:
+        return {
+           color: 'text-gray-400',
+           bg: 'bg-gray-800',
+           border: 'border-gray-600/30',
+           text: 'API Key Missing',
+           icon: <WifiOff className="w-3 h-3 mr-2" />
+        };
+    }
+  };
+
+  const statusUI = getConnectionStatusUI();
+
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-8">
       
@@ -225,23 +283,31 @@ const DeckGenerator: React.FC = () => {
              <p className="text-sm text-indigo-300/60 mt-1">Design, Generate, and Export your custom 78-card deck.</p>
            </div>
            
-           <div className="flex items-center gap-4">
-              <div className="text-right hidden sm:block">
-                 <p className="text-2xl font-bold text-white font-cinzel">{totalCardsGenerated} / 78</p>
-                 <p className="text-xs text-indigo-400 uppercase tracking-widest">Cards Crafted</p>
+           <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4">
+              {/* API Status Indicator */}
+              <div className={`px-3 py-1.5 rounded-full border flex items-center text-xs font-bold uppercase tracking-wider transition-all duration-300 ${statusUI.bg} ${statusUI.border} ${statusUI.color}`}>
+                {statusUI.icon}
+                {statusUI.text}
               </div>
-              <button
-                onClick={downloadDeck}
-                disabled={totalCardsGenerated === 0 || isZipping}
-                className={`flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all ${
-                  totalCardsGenerated > 0 
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/50' 
-                  : 'bg-gray-800 text-gray-500 cursor-not-allowed'
-                }`}
-              >
-                {isZipping ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : <Download className="w-5 h-5 mr-2" />}
-                {isZipping ? 'Zipping...' : 'Download Deck'}
-              </button>
+
+              <div className="flex items-center gap-4">
+                <div className="text-right hidden sm:block">
+                  <p className="text-2xl font-bold text-white font-cinzel">{totalCardsGenerated} / 78</p>
+                  <p className="text-xs text-indigo-400 uppercase tracking-widest">Cards Crafted</p>
+                </div>
+                <button
+                  onClick={downloadDeck}
+                  disabled={totalCardsGenerated === 0 || isZipping}
+                  className={`flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all ${
+                    totalCardsGenerated > 0 
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/50' 
+                    : 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  {isZipping ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : <Download className="w-5 h-5 mr-2" />}
+                  {isZipping ? 'Zipping...' : 'Download Deck'}
+                </button>
+              </div>
            </div>
         </div>
 
@@ -365,10 +431,10 @@ const DeckGenerator: React.FC = () => {
             ) : (
               <button
                 onClick={() => handleGenerateSection(activeSection)}
-                disabled={!!loadingSection}
+                disabled={!!loadingSection || connectionStatus !== 'connected'}
                 className={`
                    flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all
-                   ${!!loadingSection 
+                   ${(!!loadingSection || connectionStatus !== 'connected')
                       ? 'opacity-50 cursor-not-allowed bg-gray-700' 
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20'}
                 `}
@@ -389,13 +455,13 @@ const DeckGenerator: React.FC = () => {
               {/* Specialized Help for API Key issues */}
               {error.includes("API Key") && (
                  <div className="ml-6 text-xs text-red-300/80 space-y-2 mt-2 border-t border-red-900/30 pt-2">
-                    <p className="font-semibold text-white">How to fix this:</p>
+                    <p className="font-semibold text-white">How to fix this in VS Code:</p>
                     <ol className="list-decimal pl-4 space-y-1">
-                       <li>Do not paste the key directly into the code files.</li>
-                       <li>Look for a <strong>"Secrets"</strong>, <strong>"Environment Variables"</strong>, or <strong>".env"</strong> section in your editor.</li>
-                       <li>Create a new variable named <code className="bg-black/30 px-1 rounded text-red-100">API_KEY</code>.</li>
-                       <li>Paste your Google Gemini key string as the value.</li>
-                       <li>Restart the development server if running locally.</li>
+                       <li>Check your files list on the left.</li>
+                       <li>Create a new file named exactly <code className="bg-black/30 px-1 rounded text-red-100">.env</code> in the main folder (where index.html is).</li>
+                       <li>Inside that file, paste: <code className="bg-black/30 px-1 rounded text-red-100">API_KEY=AIzaSy...</code> (your actual key).</li>
+                       <li>Save the file.</li>
+                       <li><strong>Restart your app</strong> (stop and start the server).</li>
                     </ol>
                     <div className="flex items-center text-indigo-300 mt-2">
                       <Key className="w-3 h-3 mr-1" />

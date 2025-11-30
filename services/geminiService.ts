@@ -6,6 +6,29 @@ const apiKey = process.env.API_KEY;
 
 const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
 
+export const hasApiKey = (): boolean => {
+  return !!apiKey && apiKey !== 'dummy-key';
+};
+
+/**
+ * simple validation call to check if the key is actually valid on the server
+ */
+export const validateApiKey = async (): Promise<boolean> => {
+  if (!hasApiKey()) return false;
+  
+  try {
+    // Generate a single token to test auth
+    await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: "test",
+    });
+    return true;
+  } catch (error) {
+    console.error("API Key Validation Failed:", error);
+    return false;
+  }
+};
+
 /**
  * Generates the textual metadata for a specific section of the tarot deck.
  */
