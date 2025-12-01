@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { TarotCardData, DeckSection, DeckTheme } from '../types';
+import { TarotCardData, DeckSection } from '../types';
 import { generateDeckSectionMetadata, generateCardImage, hasApiKey, validateApiKey } from '../services/geminiService';
 import TarotCard from './TarotCard';
-import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, Image as ImageIcon, X, Key, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, X, Key, Wifi, WifiOff, AlertTriangle, ChevronDown } from 'lucide-react';
 import JSZip from 'jszip';
 
 const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'];
@@ -10,7 +10,6 @@ const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pen
 type ConnectionStatus = 'checking' | 'connected' | 'invalid' | 'missing';
 
 const DeckGenerator: React.FC = () => {
-  // Default to the requested "Gnome Deck" settings
   const [themeInput, setThemeInput] = useState('Gnome World');
   const [artStyleInput, setArtStyleInput] = useState('Rider-Waite, storybook illustration, whimsical, detailed, vintage colors');
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
@@ -70,7 +69,8 @@ const DeckGenerator: React.FC = () => {
 
     setLoadingSection(section);
     setError(null);
-    setProgress({ current: 0, total: section === 'Major Arcana' ? 22 : 14 });
+    const totalCards = section === 'Major Arcana' ? 22 : 14;
+    setProgress({ current: 0, total: totalCards });
 
     try {
       // 1. Generate Metadata
@@ -83,7 +83,6 @@ const DeckGenerator: React.FC = () => {
       }));
 
       // 2. Generate Images sequentially
-      // Reduced concurrency to 1 and added delay to respect rate limits (approx 15 RPM for free tier)
       const CONCURRENCY = 1;
       const cardsToProcess = [...initialCards];
       const results: TarotCardData[] = [...initialCards];
@@ -93,7 +92,6 @@ const DeckGenerator: React.FC = () => {
         
         await Promise.all(batch.map(async (card) => {
           try {
-            // Pass reference image if available
             const imageUrl = await generateCardImage(card.visualPrompt, referenceImage || undefined);
             const index = results.findIndex(c => c.id === card.id);
             if (index !== -1) {
@@ -108,15 +106,13 @@ const DeckGenerator: React.FC = () => {
           }
         }));
 
-        // Update state after each batch to show progress
         setDeck(prev => ({
           ...prev,
           [section]: [...results]
         }));
         setProgress(prev => prev ? { ...prev, current: Math.min(prev.total, i + CONCURRENCY) } : null);
 
-        // Add a delay between batches to respect API rate limits
-        // 2000ms delay helps keep us within typical free tier limits (approx 15 requests per minute)
+        // Rate limit delay to prevent 429 errors
         if (i + CONCURRENCY < cardsToProcess.length) {
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
@@ -124,7 +120,9 @@ const DeckGenerator: React.FC = () => {
 
     } catch (e: any) {
       console.error(e);
-      setError(e.message || "Failed to generate this section. Please try again.");
+      // Capture detailed error info
+      const msg = e.response?.data?.error?.message || e.message || JSON.stringify(e);
+      setError(`Generation failed: ${msg}`);
     } finally {
       setLoadingSection(null);
       setProgress(null);
@@ -132,35 +130,31 @@ const DeckGenerator: React.FC = () => {
   };
 
   const regenerateImage = async (cardId: string, prompt: string) => {
-    // Find the card and section
     let cardSection: DeckSection | undefined;
-    let card: TarotCardData | undefined;
 
     for (const s of SECTIONS) {
-      const found = deck[s].find(c => c.id === cardId);
-      if (found) {
+      if (deck[s].some(c => c.id === cardId)) {
         cardSection = s;
-        card = found;
         break;
       }
     }
 
-    if (!cardSection || !card) return;
+    if (!cardSection) return;
 
-    // Update state to loading
+    // Set loading state
     setDeck(prev => ({
       ...prev,
       [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, isLoadingImage: true } : c)
     }));
 
     try {
-      // Pass reference image here too
       const newUrl = await generateCardImage(prompt + ` random seed ${Math.random()}`, referenceImage || undefined);
       setDeck(prev => ({
         ...prev,
         [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, imageUrl: newUrl, isLoadingImage: false } : c)
       }));
     } catch (e) {
+      // Revert loading state on error
       setDeck(prev => ({
         ...prev,
         [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, isLoadingImage: false } : c)
@@ -168,7 +162,6 @@ const DeckGenerator: React.FC = () => {
     }
   };
 
-  // Helper to save file without external dependency
   const saveBlob = (blob: Blob, fileName: string) => {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -190,17 +183,15 @@ const DeckGenerator: React.FC = () => {
       let count = 0;
       SECTIONS.forEach(section => {
         const cards = deck[section];
-        if (cards.length > 0) {
+        if (cards && cards.length > 0) {
            const sectionFolder = folder?.folder(section.replace(/\s+/g, '_'));
            cards.forEach(card => {
              if (card.imageUrl && card.imageUrl.startsWith('data:image')) {
-                // Remove header
                 const data = card.imageUrl.split(',')[1];
                 const filename = `${card.name.replace(/\s+/g, '_')}.png`;
                 sectionFolder?.file(filename, data, { base64: true });
                 count++;
              }
-             // Add text metadata as well
              const textContent = `Name: ${card.name}\nDescription: ${card.description}\nUpright: ${card.uprightMeaning}\nReversed: ${card.reversedMeaning}`;
              sectionFolder?.file(`${card.name.replace(/\s+/g, '_')}.txt`, textContent);
            });
@@ -224,10 +215,10 @@ const DeckGenerator: React.FC = () => {
     }
   };
 
-  // Safe flattening using reduce to avoid TypeScript/environment issues with flat()
-  const allCards = (Object.values(deck) as TarotCardData[][]).reduce((acc, val) => acc.concat(val), [] as TarotCardData[]);
+  // Safe access to cards
+  const activeCards = deck[activeSection] || [];
+  const allCards = Object.values(deck).flat();
   const totalCardsGenerated = allCards.filter(c => !c.isLoadingImage && c.imageUrl).length;
-  const activeCards = deck[activeSection];
 
   const getConnectionStatusUI = () => {
     switch(connectionStatus) {
@@ -250,7 +241,7 @@ const DeckGenerator: React.FC = () => {
       case 'invalid':
         return {
            color: 'text-red-400',
-           bg: 'bg-red-950/50 animate-pulse', // Added pulse
+           bg: 'bg-red-950/50 animate-pulse',
            border: 'border-red-500/30',
            text: 'Invalid API Key',
            icon: <AlertTriangle className="w-3 h-3 mr-2" />
@@ -258,9 +249,9 @@ const DeckGenerator: React.FC = () => {
       case 'missing':
       default:
         return {
-           color: 'text-red-400', // Changed from gray to red for visibility
-           bg: 'bg-red-950/50 animate-pulse', // Added pulse
-           border: 'border-red-500/30', // Changed to red border
+           color: 'text-red-400',
+           bg: 'bg-red-950/50 animate-pulse',
+           border: 'border-red-500/30',
            text: 'API Key Missing',
            icon: <WifiOff className="w-3 h-3 mr-2" />
         };
@@ -284,7 +275,6 @@ const DeckGenerator: React.FC = () => {
            </div>
            
            <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4">
-              {/* API Status Indicator */}
               <div className={`px-3 py-1.5 rounded-full border flex items-center text-xs font-bold uppercase tracking-wider transition-all duration-300 ${statusUI.bg} ${statusUI.border} ${statusUI.color}`}>
                 {statusUI.icon}
                 {statusUI.text}
@@ -386,8 +376,8 @@ const DeckGenerator: React.FC = () => {
         {/* Section Tabs */}
         <div className="flex flex-wrap gap-2 border-b border-white/5 pb-1">
           {SECTIONS.map((section) => {
-             const count = deck[section].length;
-             const isComplete = count > 0 && deck[section].every(c => !c.isLoadingImage);
+             const count = (deck[section] || []).length;
+             const isComplete = count > 0 && deck[section]?.every(c => !c.isLoadingImage);
              const isActive = activeSection === section;
              
              return (
@@ -415,9 +405,9 @@ const DeckGenerator: React.FC = () => {
             <div>
               <h3 className="text-lg font-cinzel text-white mb-1">{activeSection}</h3>
               <p className="text-sm text-indigo-300/70">
-                 {deck[activeSection].length === 0 
+                 {activeCards.length === 0 
                    ? "Not generated yet." 
-                   : `${deck[activeSection].length} cards generated.`}
+                   : `${activeCards.length} cards generated.`}
               </p>
             </div>
             
@@ -439,21 +429,24 @@ const DeckGenerator: React.FC = () => {
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20'}
                 `}
               >
-                {deck[activeSection].length > 0 ? <Wand2 className="w-5 h-5 mr-2" /> : <Sparkles className="w-5 h-5 mr-2" />}
-                {deck[activeSection].length > 0 ? 'Regenerate Entire Section' : `Generate ${activeSection}`}
+                {activeCards.length > 0 ? <Wand2 className="w-5 h-5 mr-2" /> : <Sparkles className="w-5 h-5 mr-2" />}
+                {activeCards.length > 0 ? 'Regenerate Entire Section' : `Generate ${activeSection}`}
               </button>
             )}
         </div>
         
         {error && (
             <div className="mt-4 p-4 bg-red-950/40 border border-red-900/50 rounded-lg text-red-200 text-sm">
-              <div className="flex items-center font-bold mb-2">
-                 <AlertCircle className="w-4 h-4 mr-2" />
-                 <span>{error}</span>
+              <div className="flex items-center font-bold mb-2 text-red-300">
+                 <AlertCircle className="w-5 h-5 mr-2" />
+                 <span>Error: {error}</span>
               </div>
               
-              {/* Specialized Help for API Key issues */}
-              {error.includes("API Key") && (
+              <div className="ml-7 text-xs text-red-300/70 mt-1">
+                 Check the console for more technical details. If you see 400 or 403, your API key might be restricted or invalid.
+              </div>
+
+              {error.toLowerCase().includes("key") && (
                  <div className="ml-6 text-xs text-red-300/80 space-y-2 mt-2 border-t border-red-900/30 pt-2">
                     <p className="font-semibold text-white">How to fix this in VS Code:</p>
                     <ol className="list-decimal pl-4 space-y-1">

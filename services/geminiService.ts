@@ -4,29 +4,44 @@ import { TarotCardData, DeckSection } from '../types';
 // Ensure API key is available
 const apiKey = process.env.API_KEY;
 
-const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
+// Initialize the client. Use a placeholder if missing to allow the app to load, 
+// but requests will fail if not provided later.
+const ai = new GoogleGenAI({ apiKey: apiKey || 'missing-key' });
 
 export const hasApiKey = (): boolean => {
-  return !!apiKey && apiKey !== 'dummy-key';
+  return !!apiKey && apiKey !== 'missing-key';
 };
 
 /**
- * simple validation call to check if the key is actually valid on the server
+ * Validates the API key by making a minimal request.
  */
 export const validateApiKey = async (): Promise<boolean> => {
   if (!hasApiKey()) return false;
   
   try {
-    // Generate a single token to test auth
     await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: "test",
+      contents: "ping",
     });
     return true;
   } catch (error) {
     console.error("API Key Validation Failed:", error);
     return false;
   }
+};
+
+/**
+ * Helper to clean JSON string if the model adds markdown formatting
+ */
+const cleanJsonString = (text: string): string => {
+  let clean = text.trim();
+  // Remove markdown code blocks if present
+  if (clean.startsWith('```json')) {
+    clean = clean.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (clean.startsWith('```')) {
+    clean = clean.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+  return clean;
 };
 
 /**
@@ -37,9 +52,8 @@ export const generateDeckSectionMetadata = async (
   theme: string,
   artStyle: string
 ): Promise<TarotCardData[]> => {
-  // Explicit check to give user feedback if they forgot to set the env var
-  if (!apiKey || apiKey === 'dummy-key') {
-    throw new Error("API Key is missing. Please set the API_KEY environment variable in your project settings.");
+  if (!hasApiKey()) {
+    throw new Error("API Key is missing. Please check your .env file.");
   }
 
   try {
@@ -51,7 +65,6 @@ export const generateDeckSectionMetadata = async (
       expectedNamesList = "0 The Fool, I The Magician, II The High Priestess, III The Empress, IV The Emperor, V The Hierophant, VI The Lovers, VII The Chariot, VIII Strength, IX The Hermit, X Wheel of Fortune, XI Justice, XII The Hanged Man, XIII Death, XIV Temperance, XV The Devil, XVI The Tower, XVII The Star, XVIII The Moon, XIX The Sun, XX Judgement, XXI The World";
     } else {
       promptContext = `the 14 cards of the Suit of ${section}`;
-      // Explicitly list all required names to prevent hallucinations
       expectedNamesList = `Ace of ${section}, Two of ${section}, Three of ${section}, Four of ${section}, Five of ${section}, Six of ${section}, Seven of ${section}, Eight of ${section}, Nine of ${section}, Ten of ${section}, Page of ${section}, Knight of ${section}, Queen of ${section}, King of ${section}`;
     }
 
@@ -61,15 +74,10 @@ export const generateDeckSectionMetadata = async (
       Art Style: "${artStyle}".
       
       Strict Rules:
-      1. ONLY generate cards for ${section}. Do NOT include cards from other suits.
+      1. ONLY generate cards for ${section}.
       2. The output MUST contain exactly these card names: ${expectedNamesList}.
-      3. Do NOT rename the cards (e.g. do NOT change "Queen of ${section}" to "The Empress" or any other name).
-      4. Provide a 'visualPrompt' that describes the card image in high detail. 
-         - The image MUST feature characters/elements consistent with the "${theme}" theme.
-         - The composition should roughly echo the traditional Rider-Waite symbolism but adapted to the theme.
-         - The style MUST be "${artStyle}".
-         - Include "white border" in the prompt if it fits the style.
-      5. Provide upright and reversed meanings adapted to this theme.
+      3. Provide a 'visualPrompt' that describes the card image in high detail, matching the theme.
+      4. Provide upright and reversed meanings.
     `;
 
     const response = await ai.models.generateContent({
@@ -82,7 +90,7 @@ export const generateDeckSectionMetadata = async (
           items: {
             type: Type.OBJECT,
             properties: {
-              name: { type: Type.STRING, description: `Name of the card (Must be one of: ${expectedNamesList})` },
+              name: { type: Type.STRING, description: "Name of the card" },
               description: { type: Type.STRING, description: "Short visual description." },
               uprightMeaning: { type: Type.STRING, description: "Meaning when drawn upright." },
               reversedMeaning: { type: Type.STRING, description: "Meaning when drawn reversed." },
@@ -95,21 +103,28 @@ export const generateDeckSectionMetadata = async (
     });
 
     const text = response.text;
-    if (!text) throw new Error("No text returned from Gemini");
+    if (!text) throw new Error("No text returned from Gemini API.");
 
-    const rawCards = JSON.parse(text);
+    let rawCards;
+    try {
+      rawCards = JSON.parse(cleanJsonString(text));
+    } catch (e) {
+      console.error("JSON Parse Error. Raw text:", text);
+      throw new Error("Failed to parse API response. Please try again.");
+    }
     
     // Add IDs and initial state
     return rawCards.map((card: any, index: number) => ({
       ...card,
-      id: `${section.toLowerCase().replace(' ', '-')}-${index}-${Date.now()}`,
+      id: `${section.toLowerCase().replace(/\s+/g, '-')}-${index}-${Date.now()}`,
       section: section,
       isLoadingImage: true,
     }));
 
-  } catch (error) {
+  } catch (error: any) {
     console.error(`Error generating metadata for ${section}:`, error);
-    throw error;
+    // Propagate the actual error message
+    throw new Error(error.message || "Unknown API Error");
   }
 };
 
@@ -117,8 +132,8 @@ export const generateDeckSectionMetadata = async (
  * Generates an image for a specific tarot card using its visual prompt and optional reference style.
  */
 export const generateCardImage = async (visualPrompt: string, referenceImageBase64?: string): Promise<string> => {
-  if (!apiKey || apiKey === 'dummy-key') {
-    throw new Error("API Key is missing. Please set the API_KEY environment variable in your project settings.");
+  if (!hasApiKey()) {
+    throw new Error("API Key is missing.");
   }
 
   try {
@@ -126,7 +141,6 @@ export const generateCardImage = async (visualPrompt: string, referenceImageBase
 
     // If a reference image is provided, add it to the prompt to influence style
     if (referenceImageBase64) {
-      // Extract mime type from base64 string (e.g., "data:image/jpeg;base64,...")
       const matches = referenceImageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
       
       if (matches && matches.length === 3) {
@@ -140,10 +154,9 @@ export const generateCardImage = async (visualPrompt: string, referenceImageBase
           }
         });
         parts.push({
-          text: `Create a tarot card image matching the artistic style and color palette of the provided reference image. Content: ${visualPrompt}`
+          text: `Create a tarot card image matching the artistic style of the provided reference image. Content: ${visualPrompt}`
         });
       } else {
-         // Fallback if regex fails, though unlikely for valid data URLs
          parts.push({ text: visualPrompt });
       }
     } else {
@@ -171,7 +184,7 @@ export const generateCardImage = async (visualPrompt: string, referenceImageBase
     throw new Error("No image data found in response");
   } catch (error) {
     console.error("Error generating card image:", error);
-    // Return a fallback placeholder if generation fails
-    return `https://via.placeholder.com/300x400.png?text=Generation+Failed`;
+    // Return a fallback placeholder if generation fails, to prevent app crash
+    return `https://placehold.co/300x400/1e1e2e/FFF?text=Generation+Failed`;
   }
 };
