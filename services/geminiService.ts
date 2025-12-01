@@ -45,6 +45,11 @@ const cleanJsonString = (text: string): string => {
 };
 
 /**
+ * Utility to wait for a specified duration (ms)
+ */
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
  * Generates the textual metadata for a specific section of the tarot deck.
  */
 export const generateDeckSectionMetadata = async (
@@ -130,61 +135,84 @@ export const generateDeckSectionMetadata = async (
 
 /**
  * Generates an image for a specific tarot card using its visual prompt and optional reference style.
+ * Includes Retry Logic for 429 (Rate Limit) errors.
  */
 export const generateCardImage = async (visualPrompt: string, referenceImageBase64?: string): Promise<string> => {
   if (!hasApiKey()) {
     throw new Error("API Key is missing.");
   }
 
-  try {
-    const parts: any[] = [];
+  const parts: any[] = [];
 
-    // If a reference image is provided, add it to the prompt to influence style
-    if (referenceImageBase64) {
-      const matches = referenceImageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
-      
-      if (matches && matches.length === 3) {
-         const mimeType = matches[1];
-         const data = matches[2];
+  // If a reference image is provided, add it to the prompt to influence style
+  if (referenceImageBase64) {
+    const matches = referenceImageBase64.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+    
+    if (matches && matches.length === 3) {
+       const mimeType = matches[1];
+       const data = matches[2];
 
-         parts.push({
-          inlineData: {
-            mimeType: mimeType,
-            data: data
-          }
-        });
-        parts.push({
-          text: `Create a tarot card image matching the artistic style of the provided reference image. Content: ${visualPrompt}`
-        });
-      } else {
-         parts.push({ text: visualPrompt });
-      }
+       parts.push({
+        inlineData: {
+          mimeType: mimeType,
+          data: data
+        }
+      });
+      parts.push({
+        text: `Create a tarot card image matching the artistic style of the provided reference image. Content: ${visualPrompt}`
+      });
     } else {
-      parts.push({ text: visualPrompt });
+       parts.push({ text: visualPrompt });
     }
+  } else {
+    parts.push({ text: visualPrompt });
+  }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: parts
-      },
-      config: {
-        imageConfig: {
-            aspectRatio: "3:4", 
+  // Retry logic config
+  let retries = 3;
+  let delay = 10000; // Start with 10 seconds wait
+
+  while (retries >= 0) {
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: {
+          parts: parts
+        },
+        config: {
+          imageConfig: {
+              aspectRatio: "3:4", 
+          }
+        }
+      });
+
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
-    });
+      throw new Error("No image data found in response");
 
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+    } catch (error: any) {
+      const errorMsg = error.toString().toLowerCase();
+      // Check for Rate Limit (429) or Quota related errors
+      if (errorMsg.includes("429") || errorMsg.includes("exhausted") || errorMsg.includes("quota")) {
+        console.warn(`Quota hit. Retrying in ${delay/1000}s... (Retries left: ${retries})`);
+        if (retries === 0) {
+          // If out of retries, fallback to placeholder
+          console.error("Max retries exceeded for image generation.");
+          return `https://placehold.co/300x400/1e1e2e/FFF?text=Quota+Exceeded`;
+        }
+        await wait(delay);
+        retries--;
+        delay *= 1.5; // Increase wait time for next try (Exponential backoff)
+      } else {
+        // For other errors (content policy, etc), fail fast with placeholder
+        console.error("Error generating card image:", error);
+        return `https://placehold.co/300x400/1e1e2e/FFF?text=Generation+Failed`;
       }
     }
-
-    throw new Error("No image data found in response");
-  } catch (error) {
-    console.error("Error generating card image:", error);
-    // Return a fallback placeholder if generation fails, to prevent app crash
-    return `https://placehold.co/300x400/1e1e2e/FFF?text=Generation+Failed`;
   }
+  
+  return `https://placehold.co/300x400/1e1e2e/FFF?text=Generation+Failed`;
 };

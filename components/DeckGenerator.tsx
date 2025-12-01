@@ -112,9 +112,10 @@ const DeckGenerator: React.FC = () => {
         }));
         setProgress(prev => prev ? { ...prev, current: Math.min(prev.total, i + CONCURRENCY) } : null);
 
-        // Rate limit delay to prevent 429 errors
+        // Increased delay to 4000ms (4 seconds) to stay safer within free tier limits
+        // This is about 15 requests per minute max.
         if (i + CONCURRENCY < cardsToProcess.length) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 4000));
         }
       }
 
