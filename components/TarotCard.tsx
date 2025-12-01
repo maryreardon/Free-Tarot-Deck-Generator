@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TarotCardData } from '../types';
-import { Sparkles, RefreshCcw, Maximize2, Paintbrush, Palette } from 'lucide-react';
+import { Sparkles, RefreshCcw, Maximize2, Paintbrush, Palette, AlertTriangle, Moon } from 'lucide-react';
 
 interface TarotCardProps {
   card: TarotCardData;
@@ -17,6 +17,9 @@ const TarotCard: React.FC<TarotCardProps> = ({ card, onRegenerateImage, onGenera
 
   // Check if this is a "Draft" card (Text exists, but no image and not loading)
   const isDraft = !card.imageUrl && !card.isLoadingImage;
+  
+  // Check if generation failed (Quota or Error)
+  const isError = card.imageUrl?.includes('Quota') || card.imageUrl?.includes('Failed') || card.imageUrl?.includes('Generation+Failed');
 
   return (
     <div className="group relative w-full perspective-1000 h-[500px]">
@@ -34,12 +37,33 @@ const TarotCard: React.FC<TarotCardProps> = ({ card, onRegenerateImage, onGenera
               <Sparkles className="w-12 h-12 mb-4 animate-spin-slow" />
               <p className="text-sm font-cinzel">Conjuring Image...</p>
             </div>
+          ) : isError ? (
+            /* Error / Quota State */
+            <div className="w-full h-full flex flex-col items-center justify-center bg-red-950/20 p-6 text-center relative overflow-hidden">
+                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagmonds-light.png')] opacity-10"></div>
+                <AlertTriangle className="w-12 h-12 text-amber-500/80 mb-4" />
+                <h3 className="text-lg font-cinzel text-amber-200 mb-2">Magic Depleted</h3>
+                <p className="text-xs text-amber-200/60 mb-6 max-w-[200px] leading-relaxed">
+                   The spirits are resting (Quota Exceeded). Wait a while and try again.
+                </p>
+                {onRegenerateImage && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onRegenerateImage(card.id, card.visualPrompt);
+                        }}
+                        className="px-6 py-2 bg-amber-900/40 hover:bg-amber-800/60 text-amber-200 text-xs rounded-full border border-amber-500/30 uppercase tracking-widest transition-all flex items-center hover:scale-105"
+                    >
+                        <RefreshCcw className="w-3 h-3 mr-2" /> Retry Spell
+                    </button>
+                )}
+            </div>
           ) : isDraft ? (
             /* Draft State - Ready to Paint */
             <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 p-6 relative">
                <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
                
-               <div className="border-2 border-dashed border-indigo-700/30 w-full h-full rounded-lg flex flex-col items-center justify-center text-center p-4">
+               <div className="border-2 border-dashed border-indigo-700/30 w-full h-full rounded-lg flex flex-col items-center justify-center text-center p-4 group-hover:border-indigo-500/50 transition-colors">
                   <h3 className="text-xl font-cinzel text-indigo-200 mb-2">{card.name}</h3>
                   <p className="text-xs text-indigo-400/60 line-clamp-3 mb-6 italic">"{card.description}"</p>
                   
@@ -140,7 +164,7 @@ const TarotCard: React.FC<TarotCardProps> = ({ card, onRegenerateImage, onGenera
                     }}
                     className="flex items-center justify-center w-full py-2 text-xs uppercase tracking-widest text-indigo-300 hover:text-white hover:bg-indigo-900/50 rounded transition-colors"
                 >
-                    <RefreshCcw className="w-3 h-3 mr-2" /> Redraw Image
+                    <RefreshCcw className="w-3 h-3 mr-2" /> {isError ? 'Try Spell Again' : 'Redraw Image'}
                 </button>
                 )}
             </div>

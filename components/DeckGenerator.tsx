@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { TarotCardData, DeckSection } from '../types';
 import { generateDeckSectionMetadata, generateCardImage, hasApiKey, validateApiKey } from '../services/geminiService';
 import TarotCard from './TarotCard';
-import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, X, Key, Wifi, WifiOff, AlertTriangle, ChevronDown, Play, FileText, Paintbrush } from 'lucide-react';
+import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, X, Key, Wifi, WifiOff, AlertTriangle, ChevronDown, Play, FileText, Paintbrush, Trash2 } from 'lucide-react';
 import JSZip from 'jszip';
 
 const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'];
@@ -10,17 +10,35 @@ const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pen
 type ConnectionStatus = 'checking' | 'connected' | 'invalid' | 'missing';
 
 const DeckGenerator: React.FC = () => {
-  const [themeInput, setThemeInput] = useState('Gnome World');
-  const [artStyleInput, setArtStyleInput] = useState('Rider-Waite, storybook illustration, whimsical, detailed, vintage colors');
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  // Load state from local storage if available
+  const [themeInput, setThemeInput] = useState(() => localStorage.getItem('tarot_theme') || 'Gnome World');
+  const [artStyleInput, setArtStyleInput] = useState(() => localStorage.getItem('tarot_style') || 'Rider-Waite, storybook illustration, whimsical, detailed, vintage colors');
+  const [referenceImage, setReferenceImage] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('tarot_ref_image');
+    } catch(e) { return null; }
+  });
   
   const [activeSection, setActiveSection] = useState<DeckSection>('Major Arcana');
-  const [deck, setDeck] = useState<Record<DeckSection, TarotCardData[]>>({
-    'Major Arcana': [],
-    'Wands': [],
-    'Cups': [],
-    'Swords': [],
-    'Pentacles': []
+  const [deck, setDeck] = useState<Record<DeckSection, TarotCardData[]>>(() => {
+    try {
+      const saved = localStorage.getItem('tarot_deck');
+      return saved ? JSON.parse(saved) : {
+        'Major Arcana': [],
+        'Wands': [],
+        'Cups': [],
+        'Swords': [],
+        'Pentacles': []
+      };
+    } catch (e) {
+      return {
+        'Major Arcana': [],
+        'Wands': [],
+        'Cups': [],
+        'Swords': [],
+        'Pentacles': []
+      };
+    }
   });
 
   const [loadingSection, setLoadingSection] = useState<DeckSection | null>(null);
@@ -35,6 +53,22 @@ const DeckGenerator: React.FC = () => {
     checkConnection();
   }, []);
 
+  // Persistence Effects
+  useEffect(() => { localStorage.setItem('tarot_theme', themeInput); }, [themeInput]);
+  useEffect(() => { localStorage.setItem('tarot_style', artStyleInput); }, [artStyleInput]);
+  useEffect(() => { localStorage.setItem('tarot_deck', JSON.stringify(deck)); }, [deck]);
+  useEffect(() => { 
+    if (referenceImage) {
+      try {
+        localStorage.setItem('tarot_ref_image', referenceImage); 
+      } catch (e) {
+        console.warn("Reference image too large for local storage");
+      }
+    } else {
+      localStorage.removeItem('tarot_ref_image');
+    }
+  }, [referenceImage]);
+
   const checkConnection = async () => {
     if (!hasApiKey()) {
       setConnectionStatus('missing');
@@ -44,6 +78,21 @@ const DeckGenerator: React.FC = () => {
     setConnectionStatus('checking');
     const isValid = await validateApiKey();
     setConnectionStatus(isValid ? 'connected' : 'invalid');
+  };
+
+  const handleResetDeck = () => {
+    if (window.confirm("Are you sure you want to delete this deck and start over? This cannot be undone.")) {
+      setDeck({
+        'Major Arcana': [],
+        'Wands': [],
+        'Cups': [],
+        'Swords': [],
+        'Pentacles': []
+      });
+      localStorage.removeItem('tarot_deck');
+      setThemeInput('Gnome World');
+      setReferenceImage(null);
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -378,11 +427,12 @@ const DeckGenerator: React.FC = () => {
                 {statusUI.text}
               </div>
 
-              <div className="flex items-center gap-4">
-                <div className="text-right hidden sm:block">
+              <div className="flex items-center gap-2">
+                <div className="text-right hidden sm:block mr-2">
                   <p className="text-2xl font-bold text-white font-cinzel">{totalCardsGenerated} / 78</p>
                   <p className="text-xs text-indigo-400 uppercase tracking-widest">Cards Crafted</p>
                 </div>
+                
                 <button
                   onClick={downloadDeck}
                   disabled={totalCardsGenerated === 0 || isZipping}
@@ -393,7 +443,16 @@ const DeckGenerator: React.FC = () => {
                   }`}
                 >
                   {isZipping ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : <Download className="w-5 h-5 mr-2" />}
-                  {isZipping ? 'Zipping...' : 'Download Deck'}
+                  {isZipping ? 'Zipping...' : 'Download'}
+                </button>
+
+                <button
+                  onClick={handleResetDeck}
+                  disabled={totalCardsGenerated === 0 && !themeInput}
+                  title="Delete current deck and start over"
+                  className="flex items-center justify-center p-3 rounded-lg bg-red-950/30 text-red-400 border border-red-900/30 hover:bg-red-900/50 hover:text-red-200 transition-colors"
+                >
+                  <Trash2 className="w-5 h-5" />
                 </button>
               </div>
            </div>
