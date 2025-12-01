@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { TarotCardData, DeckSection } from '../types';
 import { generateDeckSectionMetadata, generateCardImage, hasApiKey, validateApiKey } from '../services/geminiService';
 import TarotCard from './TarotCard';
-import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, X, Key, Wifi, WifiOff, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, X, Key, Wifi, WifiOff, AlertTriangle, ChevronDown, Play } from 'lucide-react';
 import JSZip from 'jszip';
 
 const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'];
@@ -64,56 +64,95 @@ const DeckGenerator: React.FC = () => {
     }
   };
 
-  const handleGenerateSection = async (section: DeckSection) => {
+  /**
+   * Handles generation. 
+   * @param section The section to generate
+   * @param mode 'resume' will only generate missing images. 'fresh' will wipe and start over.
+   */
+  const handleGenerateSection = async (section: DeckSection, mode: 'resume' | 'fresh') => {
     if (!themeInput.trim()) return;
 
     setLoadingSection(section);
     setError(null);
-    const totalCards = section === 'Major Arcana' ? 22 : 14;
-    setProgress({ current: 0, total: totalCards });
-
+    
+    // Calculate total for progress bar
+    let cardsToProcess: TarotCardData[] = [];
+    
     try {
-      // 1. Generate Metadata
-      const initialCards = await generateDeckSectionMetadata(section, themeInput, artStyleInput);
-      
-      // Update deck with metadata placeholders
-      setDeck(prev => ({
-        ...prev,
-        [section]: initialCards
-      }));
+      if (mode === 'fresh') {
+        const totalCards = section === 'Major Arcana' ? 22 : 14;
+        setProgress({ current: 0, total: totalCards });
 
-      // 2. Generate Images sequentially
+        // 1. Generate Metadata
+        const initialCards = await generateDeckSectionMetadata(section, themeInput, artStyleInput);
+        
+        // Update deck with metadata placeholders
+        setDeck(prev => ({
+          ...prev,
+          [section]: initialCards
+        }));
+        
+        cardsToProcess = [...initialCards];
+      } else {
+        // RESUME MODE
+        const existingCards = deck[section] || [];
+        // Filter for cards that failed or haven't started (placeholder url or isLoading)
+        // We look for cards that have the "Generation Failed" placeholder or are still marked loading
+        cardsToProcess = existingCards.filter(c => 
+           c.isLoadingImage || 
+           !c.imageUrl || 
+           c.imageUrl.includes('Generation+Failed')
+        );
+
+        if (cardsToProcess.length === 0) {
+            setLoadingSection(null);
+            return;
+        }
+
+        // Reset them to loading state visually
+        setDeck(prev => ({
+            ...prev,
+            [section]: prev[section].map(c => 
+                cardsToProcess.find(p => p.id === c.id) 
+                ? { ...c, isLoadingImage: true } 
+                : c
+            )
+        }));
+
+        setProgress({ current: 0, total: cardsToProcess.length });
+      }
+
+      // 2. Generate Images sequentially for the list we identified
       const CONCURRENCY = 1;
-      const cardsToProcess = [...initialCards];
-      const results: TarotCardData[] = [...initialCards];
-
+      
+      // We need a way to update the MAIN state, not just a local array
+      // So we track IDs
+      
       for (let i = 0; i < cardsToProcess.length; i += CONCURRENCY) {
         const batch = cardsToProcess.slice(i, i + CONCURRENCY);
         
         await Promise.all(batch.map(async (card) => {
           try {
             const imageUrl = await generateCardImage(card.visualPrompt, referenceImage || undefined);
-            const index = results.findIndex(c => c.id === card.id);
-            if (index !== -1) {
-              results[index] = { ...results[index], imageUrl, isLoadingImage: false };
-            }
+            
+            // Update state immediately for this card
+            setDeck(prev => ({
+              ...prev,
+              [section]: prev[section].map(c => c.id === card.id ? { ...c, imageUrl, isLoadingImage: false } : c)
+            }));
+
           } catch (e) {
             console.error(`Failed to generate image for ${card.name}`, e);
-            const index = results.findIndex(c => c.id === card.id);
-            if (index !== -1) {
-              results[index] = { ...results[index], isLoadingImage: false };
-            }
+            setDeck(prev => ({
+              ...prev,
+              [section]: prev[section].map(c => c.id === card.id ? { ...c, isLoadingImage: false } : c)
+            }));
           }
         }));
 
-        setDeck(prev => ({
-          ...prev,
-          [section]: [...results]
-        }));
         setProgress(prev => prev ? { ...prev, current: Math.min(prev.total, i + CONCURRENCY) } : null);
 
-        // Increased delay to 4000ms (4 seconds) to stay safer within free tier limits
-        // This is about 15 requests per minute max.
+        // Rate limit delay
         if (i + CONCURRENCY < cardsToProcess.length) {
             await new Promise(resolve => setTimeout(resolve, 4000));
         }
@@ -121,7 +160,6 @@ const DeckGenerator: React.FC = () => {
 
     } catch (e: any) {
       console.error(e);
-      // Capture detailed error info
       const msg = e.response?.data?.error?.message || e.message || JSON.stringify(e);
       setError(`Generation failed: ${msg}`);
     } finally {
@@ -220,6 +258,11 @@ const DeckGenerator: React.FC = () => {
   const activeCards = deck[activeSection] || [];
   const allCards = Object.values(deck).flat();
   const totalCardsGenerated = allCards.filter(c => !c.isLoadingImage && c.imageUrl).length;
+  
+  // Check if we have incomplete cards (failed or never loaded) in the current section
+  const incompleteCount = activeCards.filter(c => 
+    !c.imageUrl || c.imageUrl.includes('Generation+Failed')
+  ).length;
 
   const getConnectionStatusUI = () => {
     switch(connectionStatus) {
@@ -378,7 +421,10 @@ const DeckGenerator: React.FC = () => {
         <div className="flex flex-wrap gap-2 border-b border-white/5 pb-1">
           {SECTIONS.map((section) => {
              const count = (deck[section] || []).length;
-             const isComplete = count > 0 && deck[section]?.every(c => !c.isLoadingImage);
+             const isComplete = count > 0 && deck[section]?.every(c => !c.isLoadingImage && c.imageUrl && !c.imageUrl.includes('Generation+Failed'));
+             // Has issues if not complete but has cards
+             const hasIssues = count > 0 && !isComplete;
+
              const isActive = activeSection === section;
              
              return (
@@ -392,7 +438,7 @@ const DeckGenerator: React.FC = () => {
                >
                  {section}
                  {count > 0 && (
-                   <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${isComplete ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400'}`}>
+                   <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${isComplete ? 'bg-emerald-900/50 text-emerald-400' : hasIssues ? 'bg-amber-900/50 text-amber-400' : 'bg-gray-800 text-gray-400'}`}>
                      {count}
                    </span>
                  )}
@@ -408,7 +454,7 @@ const DeckGenerator: React.FC = () => {
               <p className="text-sm text-indigo-300/70">
                  {activeCards.length === 0 
                    ? "Not generated yet." 
-                   : `${activeCards.length} cards generated.`}
+                   : `${activeCards.length} cards in this section.`}
               </p>
             </div>
             
@@ -420,24 +466,44 @@ const DeckGenerator: React.FC = () => {
                 </span>
               </div>
             ) : (
-              <button
-                onClick={() => handleGenerateSection(activeSection)}
-                disabled={!!loadingSection || connectionStatus !== 'connected'}
-                className={`
-                   flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all
-                   ${(!!loadingSection || connectionStatus !== 'connected')
-                      ? 'opacity-50 cursor-not-allowed bg-gray-700' 
-                      : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20'}
-                `}
-              >
-                {activeCards.length > 0 ? <Wand2 className="w-5 h-5 mr-2" /> : <Sparkles className="w-5 h-5 mr-2" />}
-                {activeCards.length > 0 ? 'Regenerate Entire Section' : `Generate ${activeSection}`}
-              </button>
+              <div className="flex gap-3">
+                 {/* Resume Button - Only shows if we have cards but some are missing/failed */}
+                 {activeCards.length > 0 && incompleteCount > 0 && (
+                     <button
+                        onClick={() => handleGenerateSection(activeSection, 'resume')}
+                        disabled={connectionStatus !== 'connected'}
+                        className={`
+                           flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all
+                           ${connectionStatus !== 'connected'
+                              ? 'opacity-50 cursor-not-allowed bg-gray-700' 
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20'}
+                        `}
+                      >
+                        <Play className="w-5 h-5 mr-2" />
+                        Resume Generation ({incompleteCount} remaining)
+                      </button>
+                 )}
+
+                 {/* Main Generate/Regenerate Button */}
+                  <button
+                    onClick={() => handleGenerateSection(activeSection, 'fresh')}
+                    disabled={connectionStatus !== 'connected'}
+                    className={`
+                       flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all
+                       ${connectionStatus !== 'connected'
+                          ? 'opacity-50 cursor-not-allowed bg-gray-700' 
+                          : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20'}
+                    `}
+                  >
+                    {activeCards.length > 0 ? <Wand2 className="w-5 h-5 mr-2" /> : <Sparkles className="w-5 h-5 mr-2" />}
+                    {activeCards.length > 0 ? (incompleteCount > 0 ? 'Restart Section' : 'Regenerate Entire Section') : `Generate ${activeSection}`}
+                  </button>
+              </div>
             )}
         </div>
         
         {error && (
-            <div className="mt-4 p-4 bg-red-950/40 border border-red-900/50 rounded-lg text-red-200 text-sm">
+            <div className="mt-4 p-4 bg-red-950/40 border border-red-900/50 rounded-lg text-red-200 text-sm animate-fade-in">
               <div className="flex items-center font-bold mb-2 text-red-300">
                  <AlertCircle className="w-5 h-5 mr-2" />
                  <span>Error: {error}</span>
@@ -446,6 +512,13 @@ const DeckGenerator: React.FC = () => {
               <div className="ml-7 text-xs text-red-300/70 mt-1">
                  Check the console for more technical details. If you see 400 or 403, your API key might be restricted or invalid.
               </div>
+              
+              {/* Quota hint */}
+              {error.toLowerCase().includes('429') && (
+                 <div className="ml-7 mt-3 p-2 bg-amber-900/20 border border-amber-700/30 rounded text-amber-200 text-xs">
+                    <strong>Tip:</strong> You hit the "Free Tier" speed limit. Wait a minute, then click <strong>Resume Generation</strong> to finish the rest!
+                 </div>
+              )}
 
               {error.toLowerCase().includes("key") && (
                  <div className="ml-6 text-xs text-red-300/80 space-y-2 mt-2 border-t border-red-900/30 pt-2">
