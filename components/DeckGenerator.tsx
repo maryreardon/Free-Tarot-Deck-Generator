@@ -310,7 +310,7 @@ const DeckGenerator: React.FC = () => {
 
   // Safe access to cards
   const activeCards = deck[activeSection] || [];
-  const allCards = Object.values(deck).flat();
+  const allCards = Object.values(deck).flat() as TarotCardData[];
   const totalCardsGenerated = allCards.filter(c => !c.isLoadingImage && c.imageUrl && !c.imageUrl.includes('Generation+Failed')).length;
   
   // Check if we have incomplete cards

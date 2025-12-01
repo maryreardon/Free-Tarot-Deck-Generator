@@ -1,4 +1,4 @@
-# Free Tarot Deck Generator
+# Personalized Tarot Deck Generator
 
 ## 🔑 How to Add Your API Key
 

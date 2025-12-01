@@ -26,7 +26,7 @@ function App() {
               </div>
               <div>
                 <h1 className="text-xl md:text-2xl font-cinzel font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-200 via-purple-200 to-amber-100">
-                  Free Tarot Deck Generator
+                  Personalized Tarot Deck Generator
                 </h1>
                 <p className="text-[10px] uppercase tracking-[0.2em] text-indigo-400">Design Your Own Oracle</p>
               </div>
