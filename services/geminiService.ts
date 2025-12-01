@@ -50,39 +50,25 @@ const cleanJsonString = (text: string): string => {
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Generates the textual metadata for a specific section of the tarot deck.
+ * Internal helper to generate a batch of cards.
  */
-export const generateDeckSectionMetadata = async (
+const generateBatch = async (
+  cardNames: string,
   section: DeckSection,
   theme: string,
   artStyle: string
-): Promise<TarotCardData[]> => {
-  if (!hasApiKey()) {
-    throw new Error("API Key is missing. Please check your .env file.");
-  }
-
-  try {
-    let promptContext = "";
-    let expectedNamesList = "";
-
-    if (section === 'Major Arcana') {
-      promptContext = "the 22 cards of the Major Arcana";
-      expectedNamesList = "0 The Fool, I The Magician, II The High Priestess, III The Empress, IV The Emperor, V The Hierophant, VI The Lovers, VII The Chariot, VIII Strength, IX The Hermit, X Wheel of Fortune, XI Justice, XII The Hanged Man, XIII Death, XIV Temperance, XV The Devil, XVI The Tower, XVII The Star, XVIII The Moon, XIX The Sun, XX Judgement, XXI The World";
-    } else {
-      promptContext = `the 14 cards of the Suit of ${section}`;
-      expectedNamesList = `Ace of ${section}, Two of ${section}, Three of ${section}, Four of ${section}, Five of ${section}, Six of ${section}, Seven of ${section}, Eight of ${section}, Nine of ${section}, Ten of ${section}, Page of ${section}, Knight of ${section}, Queen of ${section}, King of ${section}`;
-    }
-
+): Promise<any[]> => {
     const prompt = `
-      Create a list of exactly ${promptContext} for a standard 78-card Rider-Waite Tarot deck.
+      Create a list of tarot cards for a standard 78-card Rider-Waite Tarot deck.
       Theme: "${theme}".
       Art Style: "${artStyle}".
       
       Strict Rules:
-      1. ONLY generate cards for ${section}.
-      2. The output MUST contain exactly these card names: ${expectedNamesList}.
+      1. ONLY generate the cards listed below.
+      2. The output MUST contain exactly these card names: ${cardNames}.
       3. Provide a 'visualPrompt' that describes the card image in high detail, matching the theme.
       4. Provide upright and reversed meanings.
+      5. CRITICAL: Respect the traditional gender of the specific tarot figures. The High Priestess, The Empress, and all Queens MUST be depicted as FEMALE characters (e.g., a female gnome for Gnome World). The Emperor, The Hierophant, and Kings MUST be male.
     `;
 
     const response = await ai.models.generateContent({
@@ -99,7 +85,7 @@ export const generateDeckSectionMetadata = async (
               description: { type: Type.STRING, description: "Short visual description." },
               uprightMeaning: { type: Type.STRING, description: "Meaning when drawn upright." },
               reversedMeaning: { type: Type.STRING, description: "Meaning when drawn reversed." },
-              visualPrompt: { type: Type.STRING, description: "Detailed prompt for image generation." }
+              visualPrompt: { type: Type.STRING, description: "Detailed prompt for image generation. Ensure gender matches the card tradition." }
             },
             required: ["name", "description", "uprightMeaning", "reversedMeaning", "visualPrompt"],
           },
@@ -110,12 +96,44 @@ export const generateDeckSectionMetadata = async (
     const text = response.text;
     if (!text) throw new Error("No text returned from Gemini API.");
 
-    let rawCards;
     try {
-      rawCards = JSON.parse(cleanJsonString(text));
+      return JSON.parse(cleanJsonString(text));
     } catch (e) {
       console.error("JSON Parse Error. Raw text:", text);
-      throw new Error("Failed to parse API response. Please try again.");
+      throw new Error("Failed to parse API response.");
+    }
+}
+
+/**
+ * Generates the textual metadata for a specific section of the tarot deck.
+ */
+export const generateDeckSectionMetadata = async (
+  section: DeckSection,
+  theme: string,
+  artStyle: string
+): Promise<TarotCardData[]> => {
+  if (!hasApiKey()) {
+    throw new Error("API Key is missing. Please check your .env file.");
+  }
+
+  try {
+    let rawCards: any[] = [];
+
+    if (section === 'Major Arcana') {
+      // Split Major Arcana into two batches to ensure completeness and prevent token limits/truncation
+      // This specifically fixes issues where later cards (like The Sun) might be dropped.
+      const part1 = "0 The Fool, I The Magician, II The High Priestess, III The Empress, IV The Emperor, V The Hierophant, VI The Lovers, VII The Chariot, VIII Strength, IX The Hermit, X Wheel of Fortune";
+      const part2 = "XI Justice, XII The Hanged Man, XIII Death, XIV Temperance, XV The Devil, XVI The Tower, XVII The Star, XVIII The Moon, XIX The Sun, XX Judgement, XXI The World";
+      
+      const batch1 = await generateBatch(part1, section, theme, artStyle);
+      // Small delay to be nice to the API rate limiter
+      await wait(1000); 
+      const batch2 = await generateBatch(part2, section, theme, artStyle);
+      
+      rawCards = [...batch1, ...batch2];
+    } else {
+      const suitList = `Ace of ${section}, Two of ${section}, Three of ${section}, Four of ${section}, Five of ${section}, Six of ${section}, Seven of ${section}, Eight of ${section}, Nine of ${section}, Ten of ${section}, Page of ${section}, Knight of ${section}, Queen of ${section}, King of ${section}`;
+      rawCards = await generateBatch(suitList, section, theme, artStyle);
     }
     
     // Add IDs and initial state
