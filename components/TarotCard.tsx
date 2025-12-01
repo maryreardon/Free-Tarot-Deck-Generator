@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
 import { TarotCardData } from '../types';
-import { Sparkles, RefreshCcw, Maximize2 } from 'lucide-react';
+import { Sparkles, RefreshCcw, Maximize2, Paintbrush, Palette } from 'lucide-react';
 
 interface TarotCardProps {
   card: TarotCardData;
   onRegenerateImage?: (cardId: string, prompt: string) => void;
+  onGenerateImage?: (cardId: string, prompt: string) => void;
 }
 
-const TarotCard: React.FC<TarotCardProps> = ({ card, onRegenerateImage }) => {
+const TarotCard: React.FC<TarotCardProps> = ({ card, onRegenerateImage, onGenerateImage }) => {
   const [isFlipped, setIsFlipped] = useState(false);
 
   const handleFlip = () => {
     setIsFlipped(!isFlipped);
   };
+
+  // Check if this is a "Draft" card (Text exists, but no image and not loading)
+  const isDraft = !card.imageUrl && !card.isLoadingImage;
 
   return (
     <div className="group relative w-full perspective-1000 h-[500px]">
@@ -21,14 +25,40 @@ const TarotCard: React.FC<TarotCardProps> = ({ card, onRegenerateImage }) => {
         onClick={handleFlip}
         style={{ transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
       >
-        {/* Front of Card (Image) */}
-        <div className="absolute w-full h-full backface-hidden rounded-xl overflow-hidden shadow-2xl border-4 border-indigo-900/50 bg-gray-900">
+        {/* Front of Card */}
+        <div className="absolute w-full h-full backface-hidden rounded-xl overflow-hidden shadow-2xl border-4 border-indigo-900/50 bg-gray-900 flex flex-col">
+          
+          {/* Loading State */}
           {card.isLoadingImage ? (
             <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 animate-pulse text-indigo-400">
               <Sparkles className="w-12 h-12 mb-4 animate-spin-slow" />
               <p className="text-sm font-cinzel">Conjuring Image...</p>
             </div>
+          ) : isDraft ? (
+            /* Draft State - Ready to Paint */
+            <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 p-6 relative">
+               <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
+               
+               <div className="border-2 border-dashed border-indigo-700/30 w-full h-full rounded-lg flex flex-col items-center justify-center text-center p-4">
+                  <h3 className="text-xl font-cinzel text-indigo-200 mb-2">{card.name}</h3>
+                  <p className="text-xs text-indigo-400/60 line-clamp-3 mb-6 italic">"{card.description}"</p>
+                  
+                  {onGenerateImage && (
+                    <button 
+                       onClick={(e) => {
+                          e.stopPropagation();
+                          onGenerateImage(card.id, card.visualPrompt);
+                       }}
+                       className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-full flex items-center shadow-lg shadow-indigo-900/50 transition-all transform hover:scale-105"
+                    >
+                       <Palette className="w-4 h-4 mr-2" />
+                       Paint Card
+                    </button>
+                  )}
+               </div>
+            </div>
           ) : (
+            /* Completed Image State */
             <div className="relative w-full h-full">
                {/* Image Overlay Gradient */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent z-10 opacity-80"></div>
@@ -86,17 +116,34 @@ const TarotCard: React.FC<TarotCardProps> = ({ card, onRegenerateImage }) => {
               </div>
             </div>
 
-            {onRegenerateImage && !card.isLoadingImage && (
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRegenerateImage(card.id, card.visualPrompt);
-                }}
-                className="mt-4 flex items-center justify-center w-full py-2 text-xs uppercase tracking-widest text-indigo-300 hover:text-white hover:bg-indigo-900/50 rounded transition-colors"
-              >
-                <RefreshCcw className="w-3 h-3 mr-2" /> Redraw Image
-              </button>
-            )}
+            {/* Actions on Back */}
+            <div className="mt-4 border-t border-white/5 pt-4">
+                {isDraft && onGenerateImage && (
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onGenerateImage(card.id, card.visualPrompt);
+                            setIsFlipped(false); // Flip back to show loading
+                        }}
+                        className="flex items-center justify-center w-full py-2 mb-2 text-xs uppercase tracking-widest text-emerald-400 hover:text-white hover:bg-emerald-900/30 rounded transition-colors"
+                    >
+                        <Paintbrush className="w-3 h-3 mr-2" /> Generate Art
+                    </button>
+                )}
+
+                {onRegenerateImage && !card.isLoadingImage && !isDraft && (
+                <button 
+                    onClick={(e) => {
+                    e.stopPropagation();
+                    onRegenerateImage(card.id, card.visualPrompt);
+                    setIsFlipped(false); // Flip back to show loading
+                    }}
+                    className="flex items-center justify-center w-full py-2 text-xs uppercase tracking-widest text-indigo-300 hover:text-white hover:bg-indigo-900/50 rounded transition-colors"
+                >
+                    <RefreshCcw className="w-3 h-3 mr-2" /> Redraw Image
+                </button>
+                )}
+            </div>
           </div>
         </div>
       </div>

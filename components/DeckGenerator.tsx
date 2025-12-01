@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { TarotCardData, DeckSection } from '../types';
 import { generateDeckSectionMetadata, generateCardImage, hasApiKey, validateApiKey } from '../services/geminiService';
 import TarotCard from './TarotCard';
-import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, X, Key, Wifi, WifiOff, AlertTriangle, ChevronDown, Play } from 'lucide-react';
+import { Sparkles, Search, Download, Loader2, Layers, AlertCircle, Wand2, Upload, X, Key, Wifi, WifiOff, AlertTriangle, ChevronDown, Play, FileText, Paintbrush } from 'lucide-react';
 import JSZip from 'jszip';
 
 const SECTIONS: DeckSection[] = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'];
@@ -65,7 +65,32 @@ const DeckGenerator: React.FC = () => {
   };
 
   /**
-   * Handles generation. 
+   * Generates only the metadata (text) for the section.
+   * This allows the user to see the cards before spending quota on images.
+   */
+  const handleDraftSection = async (section: DeckSection) => {
+    if (!themeInput.trim()) return;
+    setLoadingSection(section);
+    setError(null);
+
+    try {
+        const initialCards = await generateDeckSectionMetadata(section, themeInput, artStyleInput);
+        
+        // Update deck with metadata, but set isLoadingImage to FALSE so they show as "Ready to Paint"
+        setDeck(prev => ({
+          ...prev,
+          [section]: initialCards.map(c => ({ ...c, isLoadingImage: false }))
+        }));
+    } catch (e: any) {
+        console.error(e);
+        setError(`Drafting failed: ${e.message}`);
+    } finally {
+        setLoadingSection(null);
+    }
+  };
+
+  /**
+   * Handles full generation or resume.
    * @param section The section to generate
    * @param mode 'resume' will only generate missing images. 'fresh' will wipe and start over.
    */
@@ -94,12 +119,13 @@ const DeckGenerator: React.FC = () => {
         
         cardsToProcess = [...initialCards];
       } else {
-        // RESUME MODE
+        // RESUME MODE (or Generate All from Draft)
         const existingCards = deck[section] || [];
-        // Filter for cards that failed or haven't started (placeholder url or isLoading)
-        // We look for cards that have the "Generation Failed" placeholder or are still marked loading
+        // Filter for cards that:
+        // 1. Have no image URL
+        // 2. OR have a failed image URL
+        // 3. OR are currently marked as loading (stuck state)
         cardsToProcess = existingCards.filter(c => 
-           c.isLoadingImage || 
            !c.imageUrl || 
            c.imageUrl.includes('Generation+Failed')
         );
@@ -122,11 +148,8 @@ const DeckGenerator: React.FC = () => {
         setProgress({ current: 0, total: cardsToProcess.length });
       }
 
-      // 2. Generate Images sequentially for the list we identified
+      // 2. Generate Images sequentially
       const CONCURRENCY = 1;
-      
-      // We need a way to update the MAIN state, not just a local array
-      // So we track IDs
       
       for (let i = 0; i < cardsToProcess.length; i += CONCURRENCY) {
         const batch = cardsToProcess.slice(i, i + CONCURRENCY);
@@ -170,17 +193,14 @@ const DeckGenerator: React.FC = () => {
 
   const regenerateImage = async (cardId: string, prompt: string) => {
     let cardSection: DeckSection | undefined;
-
     for (const s of SECTIONS) {
       if (deck[s].some(c => c.id === cardId)) {
         cardSection = s;
         break;
       }
     }
-
     if (!cardSection) return;
 
-    // Set loading state
     setDeck(prev => ({
       ...prev,
       [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, isLoadingImage: true } : c)
@@ -193,12 +213,46 @@ const DeckGenerator: React.FC = () => {
         [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, imageUrl: newUrl, isLoadingImage: false } : c)
       }));
     } catch (e) {
-      // Revert loading state on error
       setDeck(prev => ({
         ...prev,
         [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, isLoadingImage: false } : c)
       }));
     }
+  };
+
+  /**
+   * Generates a single card image on demand.
+   */
+  const handleGenerateSingleCard = async (cardId: string, prompt: string) => {
+     let cardSection: DeckSection | undefined;
+     for (const s of SECTIONS) {
+       if (deck[s].some(c => c.id === cardId)) {
+         cardSection = s;
+         break;
+       }
+     }
+     if (!cardSection) return;
+
+     // Set loading
+     setDeck(prev => ({
+        ...prev,
+        [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, isLoadingImage: true } : c)
+     }));
+
+     try {
+        const newUrl = await generateCardImage(prompt, referenceImage || undefined);
+        setDeck(prev => ({
+            ...prev,
+            [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, imageUrl: newUrl, isLoadingImage: false } : c)
+        }));
+     } catch (e) {
+        console.error(e);
+        // Reset loading
+        setDeck(prev => ({
+            ...prev,
+            [cardSection!]: prev[cardSection!].map(c => c.id === cardId ? { ...c, isLoadingImage: false } : c)
+        }));
+     }
   };
 
   const saveBlob = (blob: Blob, fileName: string) => {
@@ -257,9 +311,9 @@ const DeckGenerator: React.FC = () => {
   // Safe access to cards
   const activeCards = deck[activeSection] || [];
   const allCards = Object.values(deck).flat();
-  const totalCardsGenerated = allCards.filter(c => !c.isLoadingImage && c.imageUrl).length;
+  const totalCardsGenerated = allCards.filter(c => !c.isLoadingImage && c.imageUrl && !c.imageUrl.includes('Generation+Failed')).length;
   
-  // Check if we have incomplete cards (failed or never loaded) in the current section
+  // Check if we have incomplete cards
   const incompleteCount = activeCards.filter(c => 
     !c.imageUrl || c.imageUrl.includes('Generation+Failed')
   ).length;
@@ -448,7 +502,7 @@ const DeckGenerator: React.FC = () => {
         </div>
         
         {/* Generator Action */}
-        <div className="mt-6 bg-indigo-950/20 p-6 rounded-xl border border-indigo-900/30 flex items-center justify-between">
+        <div className="mt-6 bg-indigo-950/20 p-6 rounded-xl border border-indigo-900/30 flex flex-col md:flex-row items-center justify-between gap-4">
             <div>
               <h3 className="text-lg font-cinzel text-white mb-1">{activeSection}</h3>
               <p className="text-sm text-indigo-300/70">
@@ -459,44 +513,59 @@ const DeckGenerator: React.FC = () => {
             </div>
             
             {loadingSection === activeSection ? (
-              <div className="flex items-center bg-indigo-900/50 px-6 py-3 rounded-lg text-indigo-200">
+              <div className="flex items-center bg-indigo-900/50 px-6 py-3 rounded-lg text-indigo-200 w-full md:w-auto justify-center">
                 <Loader2 className="w-5 h-5 mr-3 animate-spin" />
                 <span>
                   Creating {progress ? `${progress.current} / ${progress.total}` : '...'}
                 </span>
               </div>
             ) : (
-              <div className="flex gap-3">
-                 {/* Resume Button - Only shows if we have cards but some are missing/failed */}
+              <div className="flex flex-wrap gap-3 w-full md:w-auto justify-center md:justify-end">
+                {/* DRAFT BUTTON (Text Only) */}
+                <button
+                    onClick={() => handleDraftSection(activeSection)}
+                    disabled={connectionStatus !== 'connected' || (activeCards.length > 0 && incompleteCount === 0)}
+                    className={`
+                       flex items-center px-4 py-3 rounded-lg font-bold tracking-wide transition-all text-sm
+                       ${connectionStatus !== 'connected' || (activeCards.length > 0 && incompleteCount === 0)
+                          ? 'opacity-50 cursor-not-allowed bg-gray-800 text-gray-500' 
+                          : 'bg-indigo-900/50 hover:bg-indigo-800/50 text-indigo-200 border border-indigo-500/30'}
+                    `}
+                  >
+                    <FileText className="w-4 h-4 mr-2" />
+                    {activeCards.length > 0 ? "Re-Draft Text" : "Draft Text Only"}
+                </button>
+
+                 {/* Resume / Fill Button - Only shows if we have drafted/partial cards */}
                  {activeCards.length > 0 && incompleteCount > 0 && (
                      <button
                         onClick={() => handleGenerateSection(activeSection, 'resume')}
                         disabled={connectionStatus !== 'connected'}
                         className={`
-                           flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all
+                           flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all text-sm
                            ${connectionStatus !== 'connected'
                               ? 'opacity-50 cursor-not-allowed bg-gray-700' 
                               : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20'}
                         `}
                       >
-                        <Play className="w-5 h-5 mr-2" />
-                        Resume Generation ({incompleteCount} remaining)
+                        <Play className="w-4 h-4 mr-2" />
+                        Generate {incompleteCount} Missing Images
                       </button>
                  )}
 
-                 {/* Main Generate/Regenerate Button */}
+                 {/* Main Generate All Button */}
                   <button
                     onClick={() => handleGenerateSection(activeSection, 'fresh')}
                     disabled={connectionStatus !== 'connected'}
                     className={`
-                       flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all
+                       flex items-center px-6 py-3 rounded-lg font-bold tracking-wide transition-all text-sm
                        ${connectionStatus !== 'connected'
                           ? 'opacity-50 cursor-not-allowed bg-gray-700' 
                           : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20'}
                     `}
                   >
-                    {activeCards.length > 0 ? <Wand2 className="w-5 h-5 mr-2" /> : <Sparkles className="w-5 h-5 mr-2" />}
-                    {activeCards.length > 0 ? (incompleteCount > 0 ? 'Restart Section' : 'Regenerate Entire Section') : `Generate ${activeSection}`}
+                    <Wand2 className="w-4 h-4 mr-2" />
+                    {activeCards.length > 0 ? 'Regenerate All' : 'Generate Full Section'}
                   </button>
               </div>
             )}
@@ -516,7 +585,7 @@ const DeckGenerator: React.FC = () => {
               {/* Quota hint */}
               {error.toLowerCase().includes('429') && (
                  <div className="ml-7 mt-3 p-2 bg-amber-900/20 border border-amber-700/30 rounded text-amber-200 text-xs">
-                    <strong>Tip:</strong> You hit the "Free Tier" speed limit. Wait a minute, then click <strong>Resume Generation</strong> to finish the rest!
+                    <strong>Tip:</strong> You hit the "Free Tier" speed limit. Wait a minute, then click <strong>Resume Generation</strong> (or generate cards one by one) to finish!
                  </div>
               )}
 
@@ -547,13 +616,20 @@ const DeckGenerator: React.FC = () => {
            <div className="flex flex-col items-center justify-center py-20 text-indigo-400/30 border-2 border-dashed border-indigo-900/30 rounded-3xl bg-black/20">
               <Layers className="w-16 h-16 mb-4" />
               <p className="text-lg font-cinzel">This section of the deck is empty.</p>
-              <p className="text-sm">Click "Generate {activeSection}" to conjure the cards.</p>
+              <p className="text-sm text-center max-w-md mx-auto mt-2">
+                  Click "Draft Text Only" to plan the cards first,<br/>
+                  or "Generate Full Section" to create everything at once.
+              </p>
            </div>
          ) : (
            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
              {activeCards.map((card, idx) => (
                 <div key={card.id} className="animate-fade-in" style={{ animationDelay: `${idx * 50}ms` }}>
-                  <TarotCard card={card} onRegenerateImage={regenerateImage} />
+                  <TarotCard 
+                    card={card} 
+                    onRegenerateImage={regenerateImage} 
+                    onGenerateImage={handleGenerateSingleCard}
+                  />
                 </div>
              ))}
            </div>
